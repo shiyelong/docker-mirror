@@ -1,30 +1,51 @@
 name: Mirror Docker Images
 
 on:
+  schedule:
+    - cron: '0 4 * * *'
   workflow_dispatch:
-    inputs:
-      images:
-        description: '镜像列表(逗号分隔)'
-        required: true
-        default: 'agent0ai/agent-zero:latest'
+  push:
+    paths:
+      - 'images.txt'
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Login to Docker Hub
         run: echo "${{ secrets.DOCKER_TOKEN }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Pull and Push Images
+      - name: Pull, Push and Export Images
         run: |
-          IFS=',' read -ra IMGS <<< "${{ github.event.inputs.images }}"
-          for img in "${IMGS[@]}"; do
+          mkdir -p exports
+          while IFS= read -r img || [ -n "$img" ]; do
             img=$(echo "$img" | xargs)
+            [[ -z "$img" || "$img" == \#* ]] && continue
+            
             echo "=== Processing $img ==="
-            docker pull "$img"
-            # Create new tag under your account
+            docker pull "$img" || { echo "FAILED: $img"; continue; }
+            
             name=$(echo "$img" | sed 's|.*/||' | sed 's/:/-/g')
+            
+            # 推到 Docker Hub
             docker tag "$img" "${{ secrets.DOCKER_USERNAME }}/$name:latest"
             docker push "${{ secrets.DOCKER_USERNAME }}/$name:latest"
-            echo "=== Done: $img -> ${{ secrets.DOCKER_USERNAME }}/$name:latest ==="
-          done
+            
+            # 导出成 tar.gz 文件
+            docker save "$img" | gzip > "exports/$name.tar.gz"
+            
+            docker rmi "$img" "${{ secrets.DOCKER_USERNAME }}/$name:latest" 2>/dev/null || true
+            echo "=== Done: $img ==="
+          done < images.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: images-${{ github.run_number }}
+          name: Docker Images ${{ github.run_number }}
+          files: exports/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
