@@ -1,0 +1,6 @@
+agent0ai/agent-zero:latest
+ghcr.io/imagegenius/immich:latest
+ollama/ollama:latest
+portainer/portainer-ce:latest
+linuxserver/nextcloud:latest
+vaultwarden/server:latest
